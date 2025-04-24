@@ -69,15 +69,26 @@ embeddings = OllamaEmbeddings(model="nomic-embed-text")
 
 # Create or load Chroma database
 persist_directory = "./chroma_db"
-if not os.path.exists(persist_directory):
+
+# Check if Data folder exists
+if not os.path.exists("./Data"):
+    st.warning("⚠️ 'Data' folder not found. Skipping document loading.")
+    documents = []
+else:
     documents = load_documents()
-    chunks = split_documents(documents)
-    db = Chroma.from_documents(
-        documents=chunks,
-        embedding=embeddings,
-        persist_directory=persist_directory
-    )
-    db.persist()
+
+if not os.path.exists(persist_directory):
+    if documents:
+        chunks = split_documents(documents)
+        db = Chroma.from_documents(
+            documents=chunks,
+            embedding=embeddings,
+            persist_directory=persist_directory
+        )
+        db.persist()
+    else:
+        st.error("❌ No documents found to initialize Chroma DB.")
+        st.stop()
 else:
     db = Chroma(persist_directory=persist_directory, embedding_function=embeddings)
 

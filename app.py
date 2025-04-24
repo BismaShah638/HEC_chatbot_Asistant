@@ -184,6 +184,7 @@ if user_query:
     with st.chat_message("user"):
         st.write(user_query)
 
+    
     chat_memory = st.session_state.conversation_memory.get(st.session_state.current_chat, [])
     st.session_state.conversation_memory.setdefault(st.session_state.current_chat, []).append({"role": "user", "content": user_query})
 

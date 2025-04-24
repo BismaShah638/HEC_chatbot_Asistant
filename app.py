@@ -8,7 +8,7 @@ from langchain.vectorstores import FAISS
 from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.chains.question_answering import load_qa_chain
-from langchain.llms import Groq as GroqLLM
+from langchain_groq import ChatGroq  # Updated import
 
 # Title
 st.set_page_config(page_title="HEC Chatbot Assistant")
@@ -56,9 +56,8 @@ else:
     db = FAISS.from_documents(documents, embedding)
     db.save_local("faiss_index")
 
-# Set up LLM
-#llm = GroqLLM(temperature=0, model_name="llama3-70b-8192")
-llm = Groq(api_key=os.getenv("GROQ_API_KEY")).chat.completions.create
+# Set up LLM using langchain_groq (updated)
+llm = ChatGroq(temperature=0, model_name="llama3-70b-8192")
 chain = load_qa_chain(llm, chain_type="stuff")
 
 # Chat history sidebar

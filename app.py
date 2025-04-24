@@ -8,7 +8,8 @@ from langchain.vectorstores import FAISS
 from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.chains.question_answering import load_qa_chain
-from langchain.llms import Groq as GroqLLM
+#from langchain.llms import Groq as GroqLLM
+from langchain_groq import Groq as GroqLLM
 
 # Title
 st.set_page_config(page_title="HEC Chatbot Assistant")

@@ -1,20 +1,5 @@
-# === SQLite Fix for ChromaDB (Streamlit Cloud compatibility) ===
-import sys
-import os
-
-os.environ["PYSQLITE3_BINARY"] = "1"
-import pysqlite3
-sys.modules["sqlite3"] = pysqlite3
-
-# === Streamlit App Configuration ===
 import streamlit as st
-st.set_page_config(
-    page_title="HEC Assistant",
-    page_icon="logo.png",
-    layout="centered",
-    initial_sidebar_state="collapsed"
-)
-
+import os
 import time
 import requests
 import zipfile
@@ -85,11 +70,15 @@ def split_documents(documents):
 
 embeddings = OllamaEmbeddings(model="nomic-embed-text")
 persist_directory = "./chroma_db"
+
+# === Update Chroma settings to fix client validation ===
 chroma_settings = Settings(
+    chroma_db_impl="duckdb+parquet",
     persist_directory=persist_directory,
     anonymized_telemetry=False,
 )
 
+# Check if Chroma DB exists, else initialize it
 if not os.path.exists(persist_directory):
     documents = load_documents()
     if documents:
@@ -97,7 +86,6 @@ if not os.path.exists(persist_directory):
         db = Chroma.from_documents(
             documents=chunks,
             embedding=embeddings,
-            persist_directory=persist_directory,
             client_settings=chroma_settings
         )
         db.persist()
@@ -184,7 +172,6 @@ if user_query:
     with st.chat_message("user"):
         st.write(user_query)
 
-    
     chat_memory = st.session_state.conversation_memory.get(st.session_state.current_chat, [])
     st.session_state.conversation_memory.setdefault(st.session_state.current_chat, []).append({"role": "user", "content": user_query})
 

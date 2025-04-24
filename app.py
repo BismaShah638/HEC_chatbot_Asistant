@@ -61,17 +61,19 @@ def load_documents():
         st.warning("⚠️ 'Data' folder not found. Skipping document loading.")
         return documents
 
+    st.write("Files in Data folder:", os.listdir(data_path))  # Debugging line
+
     for file in os.listdir(data_path):
         if file.endswith(".pdf"):
-            st.write(f"📄 Loading PDF: {file}")
+            st.write(f"📄 Loading PDF: {file}")  # Debugging line
             loader = PyPDFLoader(os.path.join(data_path, file))
             documents.extend(loader.load())
         elif file.endswith(".docx"):
-            st.write(f"📄 Loading DOCX: {file}")
+            st.write(f"📄 Loading DOCX: {file}")  # Debugging line
             loader = Docx2txtLoader(os.path.join(data_path, file))
             documents.extend(loader.load())
 
-    st.success(f"✅ Loaded {len(documents)} documents")
+    st.success(f"✅ Loaded {len(documents)} documents")  # Check how many docs are loaded
     return documents
 
 def split_documents(documents):

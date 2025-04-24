@@ -38,19 +38,22 @@ if "conversation_memory" not in st.session_state:
 # Load and process documents
 def load_documents():
     documents = []
-    
-    # Load PDF
-    for file in os.listdir("./Data"):
+    data_path = "./Data"
+
+    if not os.path.exists(data_path):
+        st.warning("⚠️ 'Data' folder not found. Skipping document loading.")
+        return documents
+
+    for file in os.listdir(data_path):
         if file.endswith(".pdf"):
-            loader = PyPDFLoader(f"./Data/{file}")
+            loader = PyPDFLoader(os.path.join(data_path, file))
             documents.extend(loader.load())
-            
-        # Load DOCX
         elif file.endswith(".docx"):
-            loader = Docx2txtLoader(f"./Data/{file}")
+            loader = Docx2txtLoader(os.path.join(data_path, file))
             documents.extend(loader.load())
-    
+
     return documents
+
 
 # Split documents into chunks
 def split_documents(documents):

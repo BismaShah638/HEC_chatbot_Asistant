@@ -1,3 +1,5 @@
+import sqlite3
+print(sqlite3.sqlite_version)
 import streamlit as st
 st.set_page_config(
     page_title="HEC Assistant",

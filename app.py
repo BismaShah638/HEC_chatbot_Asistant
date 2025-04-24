@@ -57,7 +57,8 @@ else:
     db.save_local("faiss_index")
 
 # Set up LLM
-llm = GroqLLM(temperature=0, model_name="llama3-70b-8192")
+#llm = GroqLLM(temperature=0, model_name="llama3-70b-8192")
+llm = Groq(api_key=os.getenv("GROQ_API_KEY")).chat.completions.create
 chain = load_qa_chain(llm, chain_type="stuff")
 
 # Chat history sidebar

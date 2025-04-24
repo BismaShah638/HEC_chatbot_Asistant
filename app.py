@@ -16,7 +16,6 @@ from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.embeddings import OllamaEmbeddings
 from langchain_community.vectorstores import Chroma
-from chromadb.config import Settings  # Added for local Chroma configuration
 from streamlit.components.v1 import html
 
 # === CONFIG ===
@@ -82,13 +81,7 @@ def split_documents(documents):
 embeddings = OllamaEmbeddings(model="nomic-embed-text")
 persist_directory = "./chroma_db"
 
-# === Local Chroma DB Settings ===
-from chromadb.config import Settings  # Import the Settings module for Chroma configuration
-chroma_settings = Settings(
-    chroma_db_impl="duckdb+parquet",  # Use local storage with duckdb+parquet
-    persist_directory=persist_directory
-)
-
+# === Chroma DB without client_settings ===
 if not os.path.exists(persist_directory):
     documents = load_documents()
     if documents:
@@ -96,15 +89,14 @@ if not os.path.exists(persist_directory):
         db = Chroma.from_documents(
             documents=chunks,
             embedding=embeddings,
-            persist_directory=persist_directory,
-            client_settings=chroma_settings  # Use the local mode configuration
+            persist_directory=persist_directory
         )
         db.persist()
     else:
         st.error("❌ No documents found to initialize Chroma DB.")
         st.stop()
 else:
-    db = Chroma(persist_directory=persist_directory, embedding_function=embeddings, client_settings=chroma_settings)
+    db = Chroma(persist_directory=persist_directory, embedding_function=embeddings)
 
 # === Sidebar Chat History ===
 with st.sidebar:

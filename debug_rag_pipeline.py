@@ -7,13 +7,13 @@ import pandas as pd
 import time
 from datetime import datetime
 
-from dotenv import load_dotenv
+import streamlit as st
 import os
-from groq import Groq
 
-load_dotenv()
-api_key = os.getenv("GROQ_API_KEY")
+# Access your secret API key using the Streamlit secret manager
+api_key = st.secrets["GROQ_API_KEY"]
 client = Groq(api_key=api_key)
+
 
 
 # Initialize embeddings and Chroma DB

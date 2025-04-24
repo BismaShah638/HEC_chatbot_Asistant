@@ -11,6 +11,7 @@ import time
 import requests
 import zipfile
 import io
+import chromadb
 from groq import Groq
 from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -21,8 +22,9 @@ from streamlit.components.v1 import html
 
 # === CONFIG ===
 ZIP_URL = "https://github.com/BismaShah638/HEC_chatbot_Asistant/raw/main/Data.zip"
+persist_directory = "./chroma_db"
 
-# === Auto-download and extract ZIP if Data folder is missing ===
+# === Download Data.zip if Data folder is missing ===
 def download_and_extract_zip_from_github():
     data_path = "./Data"
     if not os.path.exists(data_path):
@@ -37,7 +39,7 @@ def download_and_extract_zip_from_github():
 
 download_and_extract_zip_from_github()
 
-# === Session state initialization ===
+# === Session State Initialization ===
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "conversations" not in st.session_state:
@@ -53,11 +55,10 @@ if "conversation_memory" not in st.session_state:
 api_key = st.secrets["GROQ_API_KEY"]
 client = Groq(api_key=api_key)
 
-# === Load documents ===
+# === Load and Split Documents ===
 def load_documents():
     documents = []
-    data_path = "./Data"
-    for root, dirs, files in os.walk(data_path):
+    for root, dirs, files in os.walk("./Data"):
         for file in files:
             full_path = os.path.join(root, file)
             if file.endswith(".pdf"):
@@ -72,16 +73,18 @@ def load_documents():
     return documents
 
 def split_documents(documents):
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-    return text_splitter.split_documents(documents)
+    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    return splitter.split_documents(documents)
 
+# === Embedding & Chroma Settings ===
 embeddings = OllamaEmbeddings(model="nomic-embed-text")
-persist_directory = "./chroma_db"
 chroma_settings = Settings(
+    chroma_db_impl="duckdb+parquet",
     persist_directory=persist_directory,
     anonymized_telemetry=False,
 )
 
+# === Initialize or Load Chroma DB ===
 if not os.path.exists(persist_directory):
     documents = load_documents()
     if documents:
@@ -97,13 +100,17 @@ if not os.path.exists(persist_directory):
         st.error("❌ No documents found to initialize Chroma DB.")
         st.stop()
 else:
-    db = Chroma(
-        persist_directory=persist_directory,
-        embedding_function=embeddings,
-        client_settings=chroma_settings
-    )
+    try:
+        db = Chroma(
+            persist_directory=persist_directory,
+            embedding_function=embeddings,
+            client_settings=chroma_settings
+        )
+    except Exception as e:
+        st.error(f"❌ Failed to load Chroma DB: {e}")
+        st.stop()
 
-# === Sidebar Chat History ===
+# === Sidebar: Chat History ===
 with st.sidebar:
     st.title("Chat History")
     if st.button("+ New Chat", use_container_width=True):
@@ -116,7 +123,6 @@ with st.sidebar:
         st.rerun()
 
     st.divider()
-
     for chat_id in reversed(list(st.session_state.conversations.keys())):
         chat_title = st.session_state.chat_titles.get(chat_id, "New Chat")
         if st.button(chat_title, key=f"chat_{chat_id}", use_container_width=True):
@@ -132,37 +138,44 @@ with st.sidebar:
     </div>
     """, height=375)
 
-# === Main Chat Interface ===
+# === Main UI ===
 st.image("logo-wide.png", use_container_width="auto")
 st.title("Higher Education Commission Assistant")
 st.write("Welcome to the HEC Assistant. How may I assist you with information about higher education policies, programs, or services?")
 
 def get_groq_response(query, context, chat_memory):
-    conversation_context = ""
-    if chat_memory:
-        conversation_context = "Previous conversation:\n" + "\n".join(
-            f"{'User' if msg['role'] == 'user' else 'Assistant'}: {msg['content']}" for msg in chat_memory[-5:]
-        )
+    previous = "\n".join(
+        f"{'User' if msg['role'] == 'user' else 'Assistant'}: {msg['content']}"
+        for msg in chat_memory[-5:]
+    ) if chat_memory else ""
 
-    prompt = f"""You are a professional virtual assistant for the Higher Education Commission (HEC), Pakistan. 
-    Conversation context: {conversation_context}
-    Context: {context}
-    Question: {query}
-    Answer: """
+    prompt = f"""You are a helpful assistant for HEC Pakistan. Use the conversation and context below to answer the question clearly and accurately.
+
+Previous conversation:
+{previous}
+
+Context:
+{context}
+
+Question:
+{query}
+
+Answer:"""
 
     response = client.chat.completions.create(
         messages=[{"role": "user", "content": prompt}],
-        model="llama-3-3-70b-versatile",
+        model="llama-3-70b-8192",
         temperature=0.3,
         stream=True,
     )
     return response
 
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.write(message["content"])
+# === Chat Logic ===
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.write(msg["content"])
 
-user_query = st.chat_input("Your query from HEC Assistant:")
+user_query = st.chat_input("Your query for the HEC Assistant:")
 
 if user_query:
     if st.session_state.current_chat is None:
@@ -177,7 +190,7 @@ if user_query:
         st.write(user_query)
 
     chat_memory = st.session_state.conversation_memory.get(st.session_state.current_chat, [])
-    st.session_state.conversation_memory.setdefault(st.session_state.current_chat, []).append({"role": "user", "content": user_query})
+    st.session_state.conversation_memory[st.session_state.current_chat].append({"role": "user", "content": user_query})
 
     results = db.similarity_search(user_query, k=3)
     context = "\n".join([doc.page_content for doc in results])
@@ -193,5 +206,5 @@ if user_query:
         response_placeholder.markdown(full_response)
 
     st.session_state.messages.append({"role": "assistant", "content": full_response})
-    st.session_state.conversation_memory.setdefault(st.session_state.current_chat, []).append({"role": "assistant", "content": full_response})
+    st.session_state.conversation_memory[st.session_state.current_chat].append({"role": "assistant", "content": full_response})
     st.session_state.conversations[st.session_state.current_chat] = st.session_state.messages

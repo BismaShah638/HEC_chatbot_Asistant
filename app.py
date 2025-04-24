@@ -16,21 +16,21 @@ from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.embeddings import OllamaEmbeddings
 from langchain_community.vectorstores import Chroma
+from chromadb.config import Settings
 from streamlit.components.v1 import html
 
 # === CONFIG ===
 ZIP_URL = "https://github.com/BismaShah638/HEC_chatbot_Asistant/raw/main/Data.zip"
-DATA_PATH = "./Data"
-persist_directory = "./chroma_db"
 
 # === Auto-download and extract ZIP if Data folder is missing ===
 def download_and_extract_zip_from_github():
-    if not os.path.exists(DATA_PATH):
+    data_path = "./Data"
+    if not os.path.exists(data_path):
         st.info("📥 Downloading Data.zip from GitHub...")
         try:
             r = requests.get(ZIP_URL)
             z = zipfile.ZipFile(io.BytesIO(r.content))
-            z.extractall(DATA_PATH)
+            z.extractall(data_path)
             st.success("✅ Data folder extracted successfully.")
         except Exception as e:
             st.error(f"❌ Failed to download or extract Data.zip: {e}")
@@ -38,33 +38,36 @@ def download_and_extract_zip_from_github():
 download_and_extract_zip_from_github()
 
 # === Session state initialization ===
-for key in ["messages", "conversations", "current_chat", "chat_titles", "conversation_memory"]:
-    if key not in st.session_state:
-        st.session_state[key] = {} if "chat" in key else []
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+if "conversations" not in st.session_state:
+    st.session_state.conversations = {}
+if "current_chat" not in st.session_state:
+    st.session_state.current_chat = None
+if "chat_titles" not in st.session_state:
+    st.session_state.chat_titles = {}
+if "conversation_memory" not in st.session_state:
+    st.session_state.conversation_memory = {}
 
 # === Secrets and Groq client ===
 api_key = st.secrets["GROQ_API_KEY"]
 client = Groq(api_key=api_key)
 
-# === Load documents recursively from Data folder ===
+# === Load documents ===
 def load_documents():
     documents = []
-    if not os.path.exists(DATA_PATH):
-        st.warning("⚠️ 'Data' folder not found.")
-        return documents
-
-    for root, _, files in os.walk(DATA_PATH):
+    data_path = "./Data"
+    for root, dirs, files in os.walk(data_path):
         for file in files:
-            filepath = os.path.join(root, file)
+            full_path = os.path.join(root, file)
             if file.endswith(".pdf"):
-                st.write(f"📄 Loading PDF: {filepath}")
-                loader = PyPDFLoader(filepath)
+                st.write(f"📄 Loading PDF: {full_path}")
+                loader = PyPDFLoader(full_path)
                 documents.extend(loader.load())
             elif file.endswith(".docx"):
-                st.write(f"📄 Loading DOCX: {filepath}")
-                loader = Docx2txtLoader(filepath)
+                st.write(f"📄 Loading DOCX: {full_path}")
+                loader = Docx2txtLoader(full_path)
                 documents.extend(loader.load())
-
     st.success(f"✅ Loaded {len(documents)} documents")
     return documents
 
@@ -73,6 +76,11 @@ def split_documents(documents):
     return text_splitter.split_documents(documents)
 
 embeddings = OllamaEmbeddings(model="nomic-embed-text")
+persist_directory = "./chroma_db"
+chroma_settings = Settings(
+    persist_directory=persist_directory,
+    anonymized_telemetry=False,
+)
 
 if not os.path.exists(persist_directory):
     documents = load_documents()
@@ -81,19 +89,23 @@ if not os.path.exists(persist_directory):
         db = Chroma.from_documents(
             documents=chunks,
             embedding=embeddings,
-            persist_directory=persist_directory
+            persist_directory=persist_directory,
+            client_settings=chroma_settings
         )
         db.persist()
     else:
         st.error("❌ No documents found to initialize Chroma DB.")
         st.stop()
 else:
-    db = Chroma(persist_directory=persist_directory, embedding_function=embeddings)
+    db = Chroma(
+        persist_directory=persist_directory,
+        embedding_function=embeddings,
+        client_settings=chroma_settings
+    )
 
 # === Sidebar Chat History ===
 with st.sidebar:
     st.title("Chat History")
-
     if st.button("+ New Chat", use_container_width=True):
         chat_id = str(int(time.time()))
         st.session_state.current_chat = chat_id
@@ -140,7 +152,7 @@ def get_groq_response(query, context, chat_memory):
 
     response = client.chat.completions.create(
         messages=[{"role": "user", "content": prompt}],
-        model="llama-3.3-70b-versatile",
+        model="llama-3-3-70b-versatile",
         temperature=0.3,
         stream=True,
     )

@@ -7,10 +7,14 @@ import pandas as pd
 import time
 from datetime import datetime
 
-# Initialize Groq client (using the same configuration as app2.py)
-client = Groq(
-    api_key="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"
-)
+from dotenv import load_dotenv
+import os
+from groq import Groq
+
+load_dotenv()
+api_key = os.getenv("GROQ_API_KEY")
+client = Groq(api_key=api_key)
+
 
 # Initialize embeddings and Chroma DB
 embeddings = OllamaEmbeddings(model="nomic-embed-text")

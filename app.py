@@ -1,88 +1,83 @@
-import streamlit as st
 import os
-import shutil
-import requests
 import zipfile
-import io
-from dotenv import load_dotenv
+import requests
+import streamlit as st
+from groq import Groq
+from langchain.embeddings import OllamaEmbeddings
+from langchain.vectorstores import FAISS
 from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.embeddings import OllamaEmbeddings
-from langchain_community.vectorstores import Chroma
-from langchain.chains import RetrievalQA
-from groq import Groq
-from chromadb.config import Settings
+from langchain.chains.question_answering import load_qa_chain
+from langchain.llms import Groq as GroqLLM
 
-# Load environment variables
-load_dotenv()
+# Title
+st.set_page_config(page_title="HEC Chatbot Assistant")
+st.title("🎓 HEC Chatbot Assistant")
 
-st.set_page_config(page_title="HEC Chatbot Assistant", layout="wide")
-st.title("🎓 HEC Virtual Assistant")
+# Download and extract data.zip if not present
+if not os.path.exists("./Data"):
+    with st.spinner("📦 Downloading HEC Data..."):
+        url = "https://huggingface.co/datasets/wasiq123/HEC/resolve/main/Data.zip"
+        response = requests.get(url)
+        with open("Data.zip", "wb") as f:
+            f.write(response.content)
+        with zipfile.ZipFile("Data.zip", 'r') as zip_ref:
+            zip_ref.extractall("./")
+        os.remove("Data.zip")
+        st.success("✅ Data extracted successfully!")
 
-# Define paths
-DATA_DIR = "./Data/data"
+# Load documents
+loaders = []
+for root, _, files in os.walk("./Data"):
+    for file in files:
+        file_path = os.path.join(root, file)
+        if file.endswith(".pdf"):
+            st.write(f"📄 Loading PDF: {file_path}")
+            loaders.append(PyPDFLoader(file_path))
+        elif file.endswith(".docx"):
+            st.write(f"📄 Loading DOCX: {file_path}")
+            loaders.append(Docx2txtLoader(file_path))
 
-# ==================== Download and unzip dataset ====================
-if not os.path.exists(DATA_DIR):
-    st.info("📦 Downloading HEC documents...")
-    os.makedirs(DATA_DIR, exist_ok=True)
-    url = "https://github.com/mqasim1/HEC-chatbot-assistant/raw/main/Data.zip"
-    response = requests.get(url)
-    with zipfile.ZipFile(io.BytesIO(response.content)) as zip_ref:
-        zip_ref.extractall("./Data")
-    st.success("✅ Documents downloaded and extracted!")
+docs = []
+for loader in loaders:
+    docs.extend(loader.load())
 
-# ==================== Load Documents ====================
-@st.cache_data(show_spinner=True)
-def load_documents():
-    loaders = []
-    for filename in os.listdir(DATA_DIR):
-        filepath = os.path.join(DATA_DIR, filename)
-        if filename.endswith(".pdf"):
-            loaders.append(PyPDFLoader(filepath))
-        elif filename.endswith(".docx"):
-            loaders.append(Docx2txtLoader(filepath))
-    
-    docs = []
-    for loader in loaders:
-        docs.extend(loader.load())
-    return docs
+st.success(f"✅ Loaded {len(docs)} documents")
 
-# ==================== Split Documents ====================
-@st.cache_data(show_spinner=True)
-def split_documents(documents):
-    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-    return splitter.split_documents(documents)
+# Text splitting
+text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+documents = text_splitter.split_documents(docs)
 
-# ==================== Embeddings ====================
-@st.cache_resource(show_spinner=True)
-def create_embeddings():
-    return OllamaEmbeddings(model="nomic-embed-text")
+# Embeddings and Vector Store
+embedding = OllamaEmbeddings(model="nomic-embed-text")
+if os.path.exists("faiss_index"):
+    db = FAISS.load_local("faiss_index", embeddings=embedding)
+else:
+    db = FAISS.from_documents(documents, embedding)
+    db.save_local("faiss_index")
 
-# ==================== Vector Store (Chroma In-Memory) ====================
-@st.cache_resource(show_spinner=True)
-def create_vectorstore(chunks, embeddings):
-    chroma_settings = Settings(anonymized_telemetry=False)
-    return Chroma.from_documents(documents=chunks, embedding=embeddings, client_settings=chroma_settings)
+# Set up LLM
+llm = GroqLLM(temperature=0, model_name="llama3-70b-8192")
+chain = load_qa_chain(llm, chain_type="stuff")
 
-# ==================== Initialize Chatbot ====================
-documents = load_documents()
-st.success(f"✅ Loaded {len(documents)} documents")
+# Chat history sidebar
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
 
-chunks = split_documents(documents)
-embeddings = create_embeddings()
-db = create_vectorstore(chunks, embeddings)
+with st.sidebar:
+    st.header("🗂️ Chat History")
+    for i, entry in enumerate(st.session_state.chat_history):
+        with st.expander(f"Q{i+1}: {entry['question']}"):
+            st.write(entry['answer'])
 
-retriever = db.as_retriever()
-
-llm = Groq(model="llama3-70b-8192")
-
-qa = RetrievalQA.from_chain_type(llm=llm, chain_type="stuff", retriever=retriever)
-
-# ==================== Chat Interface ====================
-query = st.text_input("Ask a question about HEC:")
+# Input and response area
+query = st.text_input("Ask a question about HEC policies, degrees, or scholarships:")
 if query:
-    with st.spinner("🔍 Searching..."):
-        result = qa.run(query)
-        st.success("💬 Response:")
-        st.write(result)
+    with st.spinner("🤖 Generating answer..."):
+        docs = db.similarity_search(query)
+        answer = chain.run(input_documents=docs, question=query)
+        st.write("### 🧠 Answer:")
+        st.write(answer)
+
+        # Save chat
+        st.session_state.chat_history.append({"question": query, "answer": answer})

@@ -1,4 +1,10 @@
 import streamlit as st
+st.set_page_config(
+    page_title="HEC Assistant",
+    page_icon="logo.png",
+    layout="centered",
+    initial_sidebar_state="collapsed"
+)
 import os
 import time
 import requests
@@ -30,7 +36,13 @@ def download_and_extract_zip_from_github():
 download_and_extract_zip_from_github()
 
 # === Streamlit config ===
-st.set_page_config(page_title="HEC Assistant", page_icon="logo.png", layout="centered", initial_sidebar_state="collapsed")
+#st.set_page_config(
+ #   page_title="HEC Assistant",
+  #  page_icon="logo.png",
+   # layout="centered",
+   # initial_sidebar_state="collapsed"
+#)
+
 
 # === Session state initialization ===
 if "messages" not in st.session_state:

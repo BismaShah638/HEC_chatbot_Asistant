@@ -16,10 +16,11 @@ from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.embeddings import OllamaEmbeddings
 from langchain_community.vectorstores import Chroma
+from chromadb.config import Settings  # Added for local Chroma configuration
 from streamlit.components.v1 import html
 
 # === CONFIG ===
-ZIP_URL = "https://github.com/BismaShah638/HEC_chatbot_Asistant/raw/main/Data.zip"
+ZIP_URL = "https://github.com/BismaShah638/HEC_chatbot_Asistant/raw/main/Data.zip"  # Replace with your actual raw ZIP URL
 
 # === Auto-download and extract ZIP if Data folder is missing ===
 def download_and_extract_zip_from_github():
@@ -52,7 +53,7 @@ if "conversation_memory" not in st.session_state:
 api_key = st.secrets["GROQ_API_KEY"]
 client = Groq(api_key=api_key)
 
-# === Load documents recursively ===
+# === Load documents ===
 def load_documents():
     documents = []
     data_path = "./Data"
@@ -61,27 +62,17 @@ def load_documents():
         st.warning("⚠️ 'Data' folder not found. Skipping document loading.")
         return documents
 
-    file_count = 0
+    for file in os.listdir(data_path):
+        if file.endswith(".pdf"):
+            st.write(f"📄 Loading PDF: {file}")
+            loader = PyPDFLoader(os.path.join(data_path, file))
+            documents.extend(loader.load())
+        elif file.endswith(".docx"):
+            st.write(f"📄 Loading DOCX: {file}")
+            loader = Docx2txtLoader(os.path.join(data_path, file))
+            documents.extend(loader.load())
 
-    for root, dirs, files in os.walk(data_path):
-        for file in files:
-            file_path = os.path.join(root, file)
-            if file.endswith(".pdf"):
-                st.write(f"📄 Loading PDF: {file}")
-                loader = PyPDFLoader(file_path)
-                documents.extend(loader.load())
-                file_count += 1
-            elif file.endswith(".docx"):
-                st.write(f"📄 Loading DOCX: {file}")
-                loader = Docx2txtLoader(file_path)
-                documents.extend(loader.load())
-                file_count += 1
-
-    if file_count == 0:
-        st.warning("⚠️ No PDF or DOCX files found in the 'Data' folder.")
-    else:
-        st.success(f"✅ Loaded {file_count} files with {len(documents)} document chunks.")
-
+    st.success(f"✅ Loaded {len(documents)} documents")
     return documents
 
 def split_documents(documents):
@@ -91,6 +82,13 @@ def split_documents(documents):
 embeddings = OllamaEmbeddings(model="nomic-embed-text")
 persist_directory = "./chroma_db"
 
+# === Local Chroma DB Settings ===
+from chromadb.config import Settings  # Import the Settings module for Chroma configuration
+chroma_settings = Settings(
+    chroma_db_impl="duckdb+parquet",  # Use local storage with duckdb+parquet
+    persist_directory=persist_directory
+)
+
 if not os.path.exists(persist_directory):
     documents = load_documents()
     if documents:
@@ -98,14 +96,15 @@ if not os.path.exists(persist_directory):
         db = Chroma.from_documents(
             documents=chunks,
             embedding=embeddings,
-            persist_directory=persist_directory
+            persist_directory=persist_directory,
+            client_settings=chroma_settings  # Use the local mode configuration
         )
         db.persist()
     else:
         st.error("❌ No documents found to initialize Chroma DB.")
         st.stop()
 else:
-    db = Chroma(persist_directory=persist_directory, embedding_function=embeddings)
+    db = Chroma(persist_directory=persist_directory, embedding_function=embeddings, client_settings=chroma_settings)
 
 # === Sidebar Chat History ===
 with st.sidebar:
@@ -130,12 +129,10 @@ with st.sidebar:
             st.rerun()
 
     st.divider()
-    html("""
-    <div style="margin-top: 30px;">
-    <elevenlabs-convai agent-id=\"uYPNss1TW5NZdW1j6m5d\"></elevenlabs-convai>
-    <script src=\"https://elevenlabs.io/convai-widget/index.js\" async type=\"text/javascript\"></script>
-    </div>
-    """, height=375)
+    html("""<div style="margin-top: 30px;">
+    <elevenlabs-convai agent-id="uYPNss1TW5NZdW1j6m5d"></elevenlabs-convai>
+    <script src="https://elevenlabs.io/convai-widget/index.js" async type="text/javascript"></script>
+    </div>""", height=375)
 
 # === Main Chat Interface ===
 st.image("logo-wide.png", use_container_width="auto")
@@ -149,7 +146,7 @@ def get_groq_response(query, context, chat_memory):
             f"{'User' if msg['role'] == 'user' else 'Assistant'}: {msg['content']}" for msg in chat_memory[-5:]
         )
 
-    prompt = f"""You are a professional virtual assistant for the Higher Education Commission (HEC), Pakistan...
+    prompt = f"""You are a professional virtual assistant for the Higher Education Commission (HEC), Pakistan... 
     Conversation context: {conversation_context}
     Context: {context}
     Question: {query}

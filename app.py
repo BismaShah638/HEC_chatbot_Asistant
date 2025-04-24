@@ -34,11 +34,27 @@ if "chat_titles" not in st.session_state:
     st.session_state.chat_titles = {}
 if "conversation_memory" not in st.session_state:
     st.session_state.conversation_memory = {}
-
 # Load and process documents
-'Data' folder not found. Skipping document loading.
+def load_documents():
+    documents = []
+    data_path = "./Data"
 
-❌ No documents found to initialize Chroma DB.
+    if not os.path.exists(data_path):
+        st.warning("⚠️ 'Data' folder not found. Skipping document loading.")
+        return documents
+
+    for file in os.listdir(data_path):
+        if file.endswith(".pdf"):
+            st.write(f"📄 Loading PDF: {file}")
+            loader = PyPDFLoader(os.path.join(data_path, file))
+            documents.extend(loader.load())
+        elif file.endswith(".docx"):
+            st.write(f"📄 Loading DOCX: {file}")
+            loader = Docx2txtLoader(os.path.join(data_path, file))
+            documents.extend(loader.load())
+
+    st.success(f"✅ Loaded {len(documents)} documents")
+    return documents
 
 
 # Split documents into chunks

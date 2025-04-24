@@ -7,18 +7,18 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.embeddings import OllamaEmbeddings
 from langchain_community.vectorstores import Chroma
 from streamlit.components.v1 import html
+import streamlit as st
+import os
+
+# Access your secret API key using the Streamlit secret manager
+api_key = st.secrets["GROQ_API_KEY"]
+client = Groq(api_key=api_key)
 
 
 # Initialize Groq client
 # client = Groq(
    #  api_key="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"
 # )
-from dotenv import load_dotenv
-import os
-
-load_dotenv()  # Loads variables from .env file
-
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 # Set up Streamlit page
 st.set_page_config(page_title = "HEC Assistant", page_icon = "logo.png", layout="centered", initial_sidebar_state = "collapsed")

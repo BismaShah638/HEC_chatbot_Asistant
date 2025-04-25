@@ -2,8 +2,7 @@ import os
 import zipfile
 import requests
 import streamlit as st
-import langchain.groq as GroqLLM
-#from langchain_groq import Groq as GroqLLM
+from langchain.groq import Groq as GroqLLM
 from langchain.embeddings import OllamaEmbeddings
 from langchain.vectorstores import FAISS
 from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader

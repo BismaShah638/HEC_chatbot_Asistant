@@ -9,11 +9,17 @@ from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.chains.question_answering import load_qa_chain
 
+# Set page config
+st.set_page_config(
+    page_title="HEC Chatbot Assistant",
+    page_icon="🎓",
+    layout="centered"
+)
+
 # Title
-st.set_page_config(page_title="HEC Chatbot Assistant")
 st.title("🎓 HEC Chatbot Assistant")
 
-# Download and extract data.zip if not present
+# Download and extract Data.zip from Hugging Face if not present
 if not os.path.exists("./Data"):
     with st.spinner("📦 Downloading HEC Data..."):
         url = "https://huggingface.co/datasets/wasiq123/HEC/resolve/main/Data.zip"
@@ -31,10 +37,8 @@ for root, _, files in os.walk("./Data"):
     for file in files:
         file_path = os.path.join(root, file)
         if file.endswith(".pdf"):
-            st.write(f"📄 Loading PDF: {file_path}")
             loaders.append(PyPDFLoader(file_path))
         elif file.endswith(".docx"):
-            st.write(f"📄 Loading DOCX: {file_path}")
             loaders.append(Docx2txtLoader(file_path))
 
 docs = []

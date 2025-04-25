@@ -2,8 +2,8 @@ streamlit==1.32.2
 langchain==0.1.14
 langchain-community==0.0.34
 langchain-ollama==0.0.5
-langchain-faiss==0.0.3
-faiss-cpu==1.7.4
+langchain-chroma==0.0.3
+chromadb==0.4.13
 pypdf==3.17.4
 docx2txt==0.8
 ollama==0.1.8

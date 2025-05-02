@@ -1,155 +1,99 @@
-import streamlit as st
 import os
-import time
-import zipfile
-import requests
-from groq import Groq
+import streamlit as st
 from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.embeddings import OllamaEmbeddings
-from langchain_community.vectorstores import Chroma
-from streamlit.components.v1 import html
+from langchain_community.embeddings import OllamaEmbeddings
+from langchain.vectorstores import FAISS
+from langchain.chains import RetrievalQA
+from langchain.llms import Groq
 
-# === 1. Extract Data.zip from GitHub ===
-DATA_DIR = "./Data"
-ZIP_URL = "https://github.com/YOUR_USERNAME/YOUR_REPO_NAME/raw/main/data.zip"  # ⬅️ CHANGE THIS
+# Page configuration
+st.set_page_config(
+    page_title="HEC Assistant",
+    page_icon="📚",
+    layout="centered",
+    initial_sidebar_state="collapsed"
+)
+st.title("🎓 HEC Virtual Assistant")
 
-if not os.path.exists(DATA_DIR):
-    os.makedirs(DATA_DIR, exist_ok=True)
-    zip_path = "data.zip"
-    with open(zip_path, "wb") as f:
-        f.write(requests.get(ZIP_URL).content)
-    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-        zip_ref.extractall(DATA_DIR)
-    os.remove(zip_path)
-
-# === 2. Setup Streamlit Page ===
-st.set_page_config(page_title="HEC Assistant", page_icon="📘", layout="centered", initial_sidebar_state="collapsed")
-
-# === 3. Session State Init ===
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-if "conversations" not in st.session_state:
-    st.session_state.conversations = {}
-if "current_chat" not in st.session_state:
-    st.session_state.current_chat = None
-if "chat_titles" not in st.session_state:
-    st.session_state.chat_titles = {}
-if "conversation_memory" not in st.session_state:
-    st.session_state.conversation_memory = {}
-
-# === 4. Load and Process Documents ===
+# Function to load all .pdf and .docx files from current directory
 def load_documents():
     documents = []
-    for file in os.listdir(DATA_DIR):
-        path = os.path.join(DATA_DIR, file)
+    for file in os.listdir("."):
         if file.endswith(".pdf"):
-            documents.extend(PyPDFLoader(path).load())
+            try:
+                loader = PyPDFLoader(file)
+                documents.extend(loader.load())
+            except Exception as e:
+                st.warning(f"Could not load {file}: {e}")
         elif file.endswith(".docx"):
-            documents.extend(Docx2txtLoader(path).load())
+            try:
+                loader = Docx2txtLoader(file)
+                documents.extend(loader.load())
+            except Exception as e:
+                st.warning(f"Could not load {file}: {e}")
     return documents
 
+# Text splitter
 def split_documents(documents):
-    return RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200).split_documents(documents)
+    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    return splitter.split_documents(documents)
 
-# === 5. Embeddings & Chroma DB Init ===
-embeddings = OllamaEmbeddings(model="nomic-embed-text")
-persist_directory = "./chroma_db"
+# Load vector database (FAISS)
+@st.cache_resource(show_spinner="🔍 Indexing documents...")
+def load_vector_store():
+    raw_docs = load_documents()
+    if not raw_docs:
+        st.error("❌ No PDF or DOCX files found in the root directory.")
+        return None
+    chunks = split_documents(raw_docs)
+    embeddings = OllamaEmbeddings(model="nomic-embed-text")
+    return FAISS.from_documents(chunks, embeddings)
 
-if not os.path.exists(persist_directory):
-    documents = load_documents()
-    chunks = split_documents(documents)
-    db = Chroma.from_documents(documents=chunks, embedding=embeddings, persist_directory=persist_directory)
-    db.persist()
+# Initialize retriever
+vector_store = load_vector_store()
+if vector_store is not None:
+    retriever = vector_store.as_retriever()
 else:
-    db = Chroma(persist_directory=persist_directory, embedding_function=embeddings)
+    st.stop()
 
-# === 6. Sidebar Chat History ===
-with st.sidebar:
-    st.title("Chat History")
-    if st.button("+ New Chat", use_container_width=True):
-        chat_id = str(int(time.time()))
-        st.session_state.current_chat = chat_id
-        st.session_state.messages = []
-        st.session_state.conversations[chat_id] = []
-        st.session_state.chat_titles[chat_id] = "New Chat"
-        st.session_state.conversation_memory[chat_id] = []
-        st.rerun()
+# Initialize Groq LLM
+llm = Groq(
+    api_key=st.secrets["GROQ_API_KEY"],
+    model="llama3-70b-8192"
+)
 
-    st.divider()
-    for chat_id in reversed(list(st.session_state.conversations.keys())):
-        title = st.session_state.chat_titles.get(chat_id, "New Chat")
-        if st.button(title, key=f"chat_{chat_id}", use_container_width=True):
-            st.session_state.current_chat = chat_id
-            st.session_state.messages = st.session_state.conversations[chat_id]
-            st.rerun()
-    st.divider()
+# Setup QA Chain
+qa_chain = RetrievalQA.from_chain_type(
+    llm=llm,
+    retriever=retriever,
+    return_source_documents=True
+)
 
-    # ElevenLabs Widget Embed (Optional)
-    html("""
-    <div style="margin-top: 30px;">
-    <elevenlabs-convai agent-id="uYPNss1TW5NZdW1j6m5d"></elevenlabs-convai>
-    <script src="https://elevenlabs.io/convai-widget/index.js" async type="text/javascript"></script>
-    </div>
-    """, height=375)
+# Session State for Chat
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-# === 7. Main Chat UI ===
-st.title("🎓 Higher Education Commission Assistant")
-st.write("Welcome to the HEC Assistant. How may I assist you with higher education policies, programs, or services?")
+# Display chat history
+for msg in st.session_state.messages:
+    role, text = msg
+    if role == "user":
+        st.chat_message("user").markdown(text)
+    else:
+        st.chat_message("assistant").markdown(text)
 
-# === 8. Groq Response Function ===
-client = Groq(api_key="YOUR_GROQ_API_KEY")  # ⬅️ Replace with secure env var if needed
+# Chat input
+prompt = st.chat_input("Ask me something about HEC...")
 
-def get_groq_response(query, context, chat_memory):
-    conversation_context = "\n".join([f"{'User' if m['role'] == 'user' else 'Assistant'}: {m['content']}" for m in chat_memory[-5:]])
-    
-    prompt = f"""
-    You are a professional virtual assistant for the Higher Education Commission (HEC), Pakistan...
-    Conversation context: {conversation_context}
-    Context: {context}
-    Question: {query}
-    Answer:
-    """
-    return client.chat.completions.create(
-        messages=[{"role": "user", "content": prompt}],
-        model="llama-3.3-70b-versatile",
-        temperature=0.3,
-        stream=True,
-    )
-
-# === 9. Chat Interaction ===
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.write(message["content"])
-
-user_query = st.chat_input("Your query from HEC Assistant:")
-if user_query:
-    if st.session_state.current_chat is None:
-        chat_id = str(int(time.time()))
-        st.session_state.current_chat = chat_id
-        st.session_state.conversations[chat_id] = []
-        st.session_state.chat_titles[chat_id] = user_query[:30] + "..." if len(user_query) > 30 else user_query
-        st.session_state.conversation_memory[chat_id] = []
-
-    st.session_state.messages.append({"role": "user", "content": user_query})
-    with st.chat_message("user"):
-        st.write(user_query)
-
-    st.session_state.conversation_memory[st.session_state.current_chat].append({"role": "user", "content": user_query})
-
-    results = db.similarity_search(user_query, k=3)
-    context = "\n".join([doc.page_content for doc in results])
+if prompt:
+    st.chat_message("user").markdown(prompt)
+    st.session_state.messages.append(("user", prompt))
 
     with st.chat_message("assistant"):
-        response_placeholder = st.empty()
-        full_response = ""
-        for chunk in get_groq_response(user_query, context, st.session_state.conversation_memory[st.session_state.current_chat]):
-            if chunk.choices[0].delta.content:
-                full_response += chunk.choices[0].delta.content
-                response_placeholder.markdown(full_response + "▌")
-                time.sleep(0.02)
-        response_placeholder.markdown(full_response)
-
-    st.session_state.messages.append({"role": "assistant", "content": full_response})
-    st.session_state.conversation_memory[st.session_state.current_chat].append({"role": "assistant", "content": full_response})
-    st.session_state.conversations[st.session_state.current_chat] = st.session_state.messages
+        with st.spinner("Generating response..."):
+            try:
+                response = qa_chain.run(prompt)
+                st.markdown(response)
+                st.session_state.messages.append(("assistant", response))
+            except Exception as e:
+                st.error(f"💥 Failed to generate response: {e}")

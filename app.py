@@ -4,14 +4,14 @@ import time
 from langchain_groq import ChatGroq
 from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.embeddings import GPT4AllEmbeddings  # Updated embedding model
-from langchain.vectorstores import FAISS
+from langchain.embeddings import HuggingFaceHubEmbeddings
+from langchain.vectorstores import Chroma
 from streamlit.components.v1 import html
 
-# Set up Streamlit page
+# Streamlit page setup
 st.set_page_config(page_title="HEC Assistant", page_icon="📘", layout="centered", initial_sidebar_state="collapsed")
 
-# Initialize session state
+# Session state setup
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "conversations" not in st.session_state:
@@ -23,7 +23,7 @@ if "chat_titles" not in st.session_state:
 if "conversation_memory" not in st.session_state:
     st.session_state.conversation_memory = {}
 
-# Load documents
+# Load PDF and DOCX documents
 def load_documents():
     documents = []
     for file in os.listdir():
@@ -35,29 +35,30 @@ def load_documents():
             documents.extend(loader.load())
     return documents
 
-# Split documents
+# Text splitter
 def split_documents(documents):
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     return text_splitter.split_documents(documents)
 
-# Vectorstore setup
-VECTOR_DB_PATH = "faiss_index"
+# Vector DB setup
+VECTOR_DB_PATH = "chroma_db"
+embeddings = HuggingFaceHubEmbeddings(
+    repo_id="sentence-transformers/all-MiniLM-L6-v2",
+    huggingfacehub_api_token=st.secrets["HUGGINGFACEHUB_API_TOKEN"]
+)
 
 if not os.path.exists(VECTOR_DB_PATH):
-    with st.spinner("Processing documents..."):
+    with st.spinner("Indexing documents..."):
         docs = load_documents()
         chunks = split_documents(docs)
-        embeddings = GPT4AllEmbeddings(model_name="gpt4all-embeddings")  # Updated embedding model
-        db = FAISS.from_documents(chunks, embeddings)
-        db.save_local(VECTOR_DB_PATH)
+        db = Chroma.from_documents(chunks, embeddings, persist_directory=VECTOR_DB_PATH)
+        db.persist()
 else:
-    embeddings = GPT4AllEmbeddings(model_name="gpt4all-embeddings")  # Updated embedding model
-    db = FAISS.load_local(VECTOR_DB_PATH, embeddings, allow_dangerous_deserialization=True)
+    db = Chroma(persist_directory=VECTOR_DB_PATH, embedding_function=embeddings)
 
-# Sidebar chat history
+# Sidebar (Chat history)
 with st.sidebar:
     st.title("Chat History")
-
     if st.button("+ New Chat", use_container_width=True):
         chat_id = str(int(time.time()))
         st.session_state.current_chat = chat_id
@@ -68,14 +69,12 @@ with st.sidebar:
         st.rerun()
 
     st.divider()
-
     for chat_id in reversed(list(st.session_state.conversations.keys())):
         title = st.session_state.chat_titles.get(chat_id, "New Chat")
         if st.button(title, key=f"chat_{chat_id}", use_container_width=True):
             st.session_state.current_chat = chat_id
             st.session_state.messages = st.session_state.conversations[chat_id]
             st.rerun()
-
     st.divider()
 
     html("""
@@ -89,26 +88,25 @@ with st.sidebar:
 st.title("🎓 HEC Assistant")
 st.write("Ask about policies, degrees, scholarships, or any other information related to HEC Pakistan.")
 
-# Initialize Groq LLM
+# LLM initialization
 llm = ChatGroq(api_key=st.secrets["GROQ_API_KEY"], model="llama3-70b-8192")
 
-# Chat display
+# Display chat history
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.write(message["content"])
 
+# User input
 user_input = st.chat_input("Your query:")
 
 def get_response(query, context, memory):
     history = "\n".join([f"{'User' if m['role'] == 'user' else 'Assistant'}: {m['content']}" for m in memory[-5:]])
-    prompt = f"""
-You are a helpful assistant for HEC Pakistan. Respond clearly and formally based only on the given context.
+    prompt = f"""You are a helpful assistant for HEC Pakistan. Respond clearly and formally based only on the given context.
 
 Context:\n{context}
 {history}
 User: {query}
-Assistant:
-"""
+Assistant:"""
     return llm.invoke(prompt)
 
 if user_input:

@@ -4,7 +4,7 @@ import time
 from langchain_groq import ChatGroq
 from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.embeddings import HuggingFaceEmbeddings
+from langchain.embeddings import GPT4AllEmbeddings  # Updated embedding model
 from langchain.vectorstores import FAISS
 from streamlit.components.v1 import html
 
@@ -47,11 +47,11 @@ if not os.path.exists(VECTOR_DB_PATH):
     with st.spinner("Processing documents..."):
         docs = load_documents()
         chunks = split_documents(docs)
-        embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+        embeddings = GPT4AllEmbeddings(model_name="gpt4all-embeddings")  # Updated embedding model
         db = FAISS.from_documents(chunks, embeddings)
         db.save_local(VECTOR_DB_PATH)
 else:
-    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+    embeddings = GPT4AllEmbeddings(model_name="gpt4all-embeddings")  # Updated embedding model
     db = FAISS.load_local(VECTOR_DB_PATH, embeddings, allow_dangerous_deserialization=True)
 
 # Sidebar chat history

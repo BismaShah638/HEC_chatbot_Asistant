@@ -1,99 +1,139 @@
-import os
 import streamlit as st
+import os
+import time
+from langchain_groq import ChatGroq
 from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.embeddings import OllamaEmbeddings
+from langchain.embeddings import HuggingFaceEmbeddings
 from langchain.vectorstores import FAISS
-from langchain.chains import RetrievalQA
-from langchain.llms import Groq
+from streamlit.components.v1 import html
 
-# Page configuration
-st.set_page_config(
-    page_title="HEC Assistant",
-    page_icon="📚",
-    layout="centered",
-    initial_sidebar_state="collapsed"
-)
-st.title("🎓 HEC Virtual Assistant")
+# Set up Streamlit page
+st.set_page_config(page_title="HEC Assistant", page_icon="📘", layout="centered", initial_sidebar_state="collapsed")
 
-# Function to load all .pdf and .docx files from current directory
-def load_documents():
-    documents = []
-    for file in os.listdir("."):
-        if file.endswith(".pdf"):
-            try:
-                loader = PyPDFLoader(file)
-                documents.extend(loader.load())
-            except Exception as e:
-                st.warning(f"Could not load {file}: {e}")
-        elif file.endswith(".docx"):
-            try:
-                loader = Docx2txtLoader(file)
-                documents.extend(loader.load())
-            except Exception as e:
-                st.warning(f"Could not load {file}: {e}")
-    return documents
-
-# Text splitter
-def split_documents(documents):
-    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-    return splitter.split_documents(documents)
-
-# Load vector database (FAISS)
-@st.cache_resource(show_spinner="🔍 Indexing documents...")
-def load_vector_store():
-    raw_docs = load_documents()
-    if not raw_docs:
-        st.error("❌ No PDF or DOCX files found in the root directory.")
-        return None
-    chunks = split_documents(raw_docs)
-    embeddings = OllamaEmbeddings(model="nomic-embed-text")
-    return FAISS.from_documents(chunks, embeddings)
-
-# Initialize retriever
-vector_store = load_vector_store()
-if vector_store is not None:
-    retriever = vector_store.as_retriever()
-else:
-    st.stop()
-
-# Initialize Groq LLM
-llm = Groq(
-    api_key=st.secrets["GROQ_API_KEY"],
-    model="llama3-70b-8192"
-)
-
-# Setup QA Chain
-qa_chain = RetrievalQA.from_chain_type(
-    llm=llm,
-    retriever=retriever,
-    return_source_documents=True
-)
-
-# Session State for Chat
+# Initialize session state
 if "messages" not in st.session_state:
     st.session_state.messages = []
+if "conversations" not in st.session_state:
+    st.session_state.conversations = {}
+if "current_chat" not in st.session_state:
+    st.session_state.current_chat = None
+if "chat_titles" not in st.session_state:
+    st.session_state.chat_titles = {}
+if "conversation_memory" not in st.session_state:
+    st.session_state.conversation_memory = {}
 
-# Display chat history
-for msg in st.session_state.messages:
-    role, text = msg
-    if role == "user":
-        st.chat_message("user").markdown(text)
-    else:
-        st.chat_message("assistant").markdown(text)
+# Load documents
+def load_documents():
+    documents = []
+    for file in os.listdir():
+        if file.endswith(".pdf"):
+            loader = PyPDFLoader(file)
+            documents.extend(loader.load())
+        elif file.endswith(".docx"):
+            loader = Docx2txtLoader(file)
+            documents.extend(loader.load())
+    return documents
 
-# Chat input
-prompt = st.chat_input("Ask me something about HEC...")
+# Split documents
+def split_documents(documents):
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    return text_splitter.split_documents(documents)
 
-if prompt:
-    st.chat_message("user").markdown(prompt)
-    st.session_state.messages.append(("user", prompt))
+# Vectorstore setup
+VECTOR_DB_PATH = "faiss_index"
+
+if not os.path.exists(VECTOR_DB_PATH):
+    with st.spinner("Processing documents..."):
+        docs = load_documents()
+        chunks = split_documents(docs)
+        embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+        db = FAISS.from_documents(chunks, embeddings)
+        db.save_local(VECTOR_DB_PATH)
+else:
+    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+    db = FAISS.load_local(VECTOR_DB_PATH, embeddings, allow_dangerous_deserialization=True)
+
+# Sidebar chat history
+with st.sidebar:
+    st.title("Chat History")
+
+    if st.button("+ New Chat", use_container_width=True):
+        chat_id = str(int(time.time()))
+        st.session_state.current_chat = chat_id
+        st.session_state.messages = []
+        st.session_state.conversations[chat_id] = []
+        st.session_state.chat_titles[chat_id] = "New Chat"
+        st.session_state.conversation_memory[chat_id] = []
+        st.rerun()
+
+    st.divider()
+
+    for chat_id in reversed(list(st.session_state.conversations.keys())):
+        title = st.session_state.chat_titles.get(chat_id, "New Chat")
+        if st.button(title, key=f"chat_{chat_id}", use_container_width=True):
+            st.session_state.current_chat = chat_id
+            st.session_state.messages = st.session_state.conversations[chat_id]
+            st.rerun()
+
+    st.divider()
+
+    html("""
+    <div style="margin-top: 30px;">
+    <elevenlabs-convai agent-id="reJNIPHhfFDU9lBMg1z0"></elevenlabs-convai>
+    <script src="https://elevenlabs.io/convai-widget/index.js" async type="text/javascript"></script>
+    </div>
+    """, height=375)
+
+# Header
+st.title("🎓 HEC Assistant")
+st.write("Ask about policies, degrees, scholarships, or any other information related to HEC Pakistan.")
+
+# Initialize Groq LLM
+llm = ChatGroq(api_key=st.secrets["GROQ_API_KEY"], model="llama3-70b-8192")
+
+# Chat display
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.write(message["content"])
+
+user_input = st.chat_input("Your query:")
+
+def get_response(query, context, memory):
+    history = "\n".join([f"{'User' if m['role'] == 'user' else 'Assistant'}: {m['content']}" for m in memory[-5:]])
+    prompt = f"""
+You are a helpful assistant for HEC Pakistan. Respond clearly and formally based only on the given context.
+
+Context:\n{context}
+{history}
+User: {query}
+Assistant:
+"""
+    return llm.invoke(prompt)
+
+if user_input:
+    if st.session_state.current_chat is None:
+        chat_id = str(int(time.time()))
+        st.session_state.current_chat = chat_id
+        st.session_state.conversations[chat_id] = []
+        st.session_state.chat_titles[chat_id] = user_input[:30] + "..." if len(user_input) > 30 else user_input
+        st.session_state.conversation_memory[chat_id] = []
+
+    st.session_state.messages.append({"role": "user", "content": user_input})
+    with st.chat_message("user"):
+        st.write(user_input)
+
+    memory = st.session_state.conversation_memory.get(st.session_state.current_chat, [])
+    st.session_state.conversation_memory[st.session_state.current_chat].append({"role": "user", "content": user_input})
+
+    docs = db.similarity_search(user_input, k=3)
+    context = "\n".join([doc.page_content for doc in docs])
 
     with st.chat_message("assistant"):
         with st.spinner("Generating response..."):
-            try:
-                response = qa_chain.run(prompt)
-                st.markdown(response)
-                st.session_state.messages.append(("assistant", response))
-            except Exception as e:
-                st.error(f"💥 Failed to generate response: {e}")
+            response = get_response(user_input, context, memory)
+            st.write(response)
+
+    st.session_state.messages.append({"role": "assistant", "content": response})
+    st.session_state.conversation_memory[st.session_state.current_chat].append({"role": "assistant", "content": response})
+    st.session_state.conversations[st.session_state.current_chat] = st.session_state.messages
